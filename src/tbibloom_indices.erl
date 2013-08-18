@@ -3,9 +3,9 @@
 
 -define(GSETPAGE, 1000).
 
--record(ctx, { riakc, bucket, key, idxbucket, idxpages }).
+-record(ctx, { riakc, bucket, key, idxbucket, idxpages, filter }).
 
-index_term(Term, #ctx{riakc=C, bucket=B, key=K}) ->
+index_term(Term, #ctx{riakc=C, bucket=B, key=K, filter=BF}) ->
 	IdxB = idx_bucket(B),
 	IdxCnt = idx_cnt_key(Term),
 	Count = case riakc_pb_socket:counter_val(C, IdxB, IdxCnt) of
@@ -19,8 +19,8 @@ index_term(Term, #ctx{riakc=C, bucket=B, key=K}) ->
 
 	PageKey = idx_page_key(Term, term_page_num(Count, ?GSETPAGE)),
 
-	Set = ordsets:from_list([K]),
-
+	Set = ordsets:from_list([{K, BF}]),
+	
 	SetMember = riakc_obj:new(IdxB, PageKey, Set),
 	case riakc_pb_socket:put(C, SetMember) of
 		ok ->
@@ -29,7 +29,28 @@ index_term(Term, #ctx{riakc=C, bucket=B, key=K}) ->
 			{error, SavErr}
 	end.
 
-get_index(Term, #ctx{riakc=C, bucket=B}=Ctx) ->
+
+get_index(Terms, Ctx) when is_list(Terms) ->
+	%io:format("Incoming Terms: ~p~n", [Terms]),
+	SortedTerms = ordsets:from_list([{get_term_counter(T, Ctx), T} || T <- Terms ]),
+	%io:format("Term Counts: ~p", [SortedTerms]),
+	[{_Count, Term }|Rest] = ordsets:to_list(SortedTerms),
+	OtherTerms = [T || {_, T} <- Rest],
+
+	AllKeys = get_keys(Term, Ctx),
+	FilteredKeys = lists:foldl(
+						fun({K, BF}, Acc) -> 
+							case tbibloom_ebloom:check_filter(BF, OtherTerms) of
+								true -> Acc ++ [K];
+								false -> Acc
+							end
+						end, [], AllKeys),
+	FilteredKeys;
+
+get_index(Term, Ctx) ->
+	[ K || {K, _BF} <- get_keys(Term, Ctx) ].
+
+get_keys(Term, #ctx{riakc=C, bucket=B}=Ctx) ->
 	IdxB = idx_bucket(B),
 	IdxCnt = idx_cnt_key(Term),
 	Keys = case riakc_pb_socket:counter_val(C, IdxB, IdxCnt) of
@@ -47,6 +68,20 @@ get_index(Term, #ctx{riakc=C, bucket=B}=Ctx) ->
 			[]
 	end,
 	Keys.
+
+get_term_counter(Term, #ctx{riakc=C, bucket=B}) ->
+	case riakc_pb_socket:counter_val(C, idx_bucket(B), idx_cnt_key(Term)) of
+		{ok, Int} when Int =< 0 -> 
+			0;
+		{error, notfound} -> 
+			0;
+		{ok, Int} when Int > 0 ->
+			Int;
+		{error, _CntErr} ->
+			0
+	end.
+
+
 
 get_index_pages(Term, Ctx) ->
 	get_index_pages(Term, Ctx, 0, []).

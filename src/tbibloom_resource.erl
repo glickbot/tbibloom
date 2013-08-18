@@ -3,7 +3,7 @@
 
 -include_lib("webmachine/include/webmachine.hrl").
 
--record(ctx, { riakc, bucket, key, idxbucket, idxpages }).
+-record(ctx, { riakc, bucket, key, idxbucket, idxpages, filter }).
 
 init([]) -> 
 	{ok, #ctx{riakc=poolboy:checkout(riak_pool)}}.
@@ -21,31 +21,35 @@ content_types_provided(RD, Ctx) ->
 process_post(RD, Ctx) -> accept_json(RD, Ctx).
 
 reply_json(RD, Ctx) -> 
-	%io:format("Debug: reply_json: ~p~n", [wrq:raw_path(RD)]),
 	Keys = get_keys(RD, Ctx),
 	Json = mochijson2:encode(Keys),
 	{Json, RD, Ctx}.
 
 reply_text(RD, Ctx) ->
-	%io:format("Debug: reply_text: ~p~n", [wrq:raw_path(RD)]),
 	Keys = get_keys(RD, Ctx),
 	{Keys, RD, Ctx}.
 
 get_keys(RD, Ctx) ->
 	B = erlang:list_to_binary(wrq:path_info(bucket, RD)),
-	T = erlang:list_to_binary(wrq:path_info(key, RD)),
+	K = erlang:list_to_binary(wrq:path_info(key, RD)),
+	T = case length(wrq:path_tokens(RD)) of
+		0 -> K;
+		Int when Int > 0 ->
+			[K] ++ [list_to_binary(X) || X <- wrq:path_tokens(RD)]
+	end,
 	tbibloom_indices:get_index(T, Ctx#ctx{bucket=B}).
 
 accept_json(RD, #ctx{riakc=C}=Ctx) ->
-	%io:format("Debug: accept_json: ~p~n", [wrq:raw_path(RD)]),
 	Json = wrq:req_body(RD),
 	B = erlang:list_to_binary(wrq:path_info(bucket, RD)),
 	K = erlang:list_to_binary(wrq:path_info(key, RD)),
-	Ctx1 = Ctx#ctx{bucket=B, key=K},
 	Object = riakc_obj:new(B, K, Json),
     Body = mochijson2:decode(Json),
     Terms = parse_terms(Body),
- 	case index_terms(Terms, Ctx1) of
+    BF = tbibloom_ebloom:get_filter(Terms),
+    %io:format("Debug: Filter: ~p~n", [BF]),
+ 	Ctx1 = Ctx#ctx{bucket=B, key=K, filter=BF},
+	case index_terms(Terms, Ctx1) of
  		ok ->
 			case riakc_pb_socket:put(C, Object) of
 				ok -> {true, RD, Ctx};
