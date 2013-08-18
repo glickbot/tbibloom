@@ -1,0 +1,28 @@
+%%-*- mode: erlang -*-
+{application, tbibloom,
+ [
+  {description, "tbibloom"},
+  {vsn, "1"},
+  {modules, []},
+  {registered, []},
+  {applications, [
+                  kernel
+                  , stdlib
+                  , inets
+                  , crypto
+                  , mochiweb
+                  , webmachine
+%                  , poolboy
+                 ]},
+  {mod, { tbibloom_app, []}},
+  {env, [
+          {riak_pool_size, [
+            {size, 10},
+            {max_overflow, 0}
+          ]},
+          {riak_pool_args, [
+            {riak_ip, "127.0.0.1"},
+            {riak_pb_port, 8087}
+          ]}
+  ]}
+]}.

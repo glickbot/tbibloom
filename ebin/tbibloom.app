@@ -1,0 +1,12 @@
+{application,tbibloom,
+             [{description,"tbibloom"},
+              {vsn,"1"},
+              {modules,[tbibloom,tbibloom_app,tbibloom_indices,
+                        tbibloom_resource,tbibloom_riakc_pool_worker,
+                        tbibloom_sup]},
+              {registered,[]},
+              {applications,[kernel,stdlib,inets,crypto,mochiweb,webmachine]},
+              {mod,{tbibloom_app,[]}},
+              {env,[{riak_pool_size,[{size,10},{max_overflow,0}]},
+                    {riak_pool_args,[{riak_ip,"127.0.0.1"},
+                                     {riak_pb_port,8087}]}]}]}.
